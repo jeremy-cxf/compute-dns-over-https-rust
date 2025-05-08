@@ -1,0 +1,34 @@
+# This file describes a Fastly Compute package. To learn more visit:
+# https://www.fastly.com/documentation/reference/compute/fastly-toml
+
+authors = ["jcocks@fastly.com"]
+description = "An API that returns reverse forward DNS Lookups"
+language = "rust"
+manifest_version = 3
+name = "doh-compute"
+service_id = ""
+
+[setup]
+ [setup.backends]
+    [setup.backends.google]
+      address = "dns.google.com"
+      description = "Google DoH endpoint"
+      port = 443
+    [setup.backends.cloudflare]
+      address = "cloudflare-dns.com"
+      description = "Cloudflare DoH endpoint"
+      port = 443
+
+[local_server]
+  [local_server.backends]
+    [local_server.backends.google]
+      url = "https://dns.google.com:443"
+    [local_server.backends.cloudflare]
+      url = "https://cloudflare-dns.com:443"
+  [local_server.kv_stores]
+  [[local_server.kv_stores.example_store]]
+    key = "null"
+    data = "null"
+
+[scripts]
+  build = "cargo build --profile release"
