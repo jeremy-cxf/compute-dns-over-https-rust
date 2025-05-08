@@ -1,7 +1,7 @@
 # This file describes a Fastly Compute package. To learn more visit:
 # https://www.fastly.com/documentation/reference/compute/fastly-toml
 
-authors = ["jcocks@fastly.com"]
+authors = ["jeremy-AT-jeremy.cx"]
 description = "An API that returns reverse forward DNS Lookups"
 language = "rust"
 manifest_version = 3
