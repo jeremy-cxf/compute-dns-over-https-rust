@@ -1,7 +1,7 @@
 # FCrDNS for compute
 
 This is a compute service that returns a reverse forward DNS lookup result over HTTP.
-The results are cached into the KV store based on the TTL on the result. It is recommended to not mix and match resolvers, based on the differing TTLs.
+The results are cached into the KV store based on the TTL on the result. It is recommended to not mix and match resolvers, based on the differing TTLs and the way the storage should seperate these resolver results (if you'd like to do it, please do!).
 
 To run locally, you must have the fastly cli installed with the appropriate Fastly Token credentials provided:
 ```
