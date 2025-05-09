@@ -1,4 +1,4 @@
-# rfDNS for compute
+# FCrDNS for compute
 
 This is a compute service that returns a reverse forward DNS lookup result over HTTP.
 The results are cached into the KV store based on the TTL on the result. It is recommended to not mix and match resolvers, based on the differing TTLs.
