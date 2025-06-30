@@ -1,6 +1,6 @@
-use fastly::http::{request::SendError, StatusCode};
+use fastly::http::{StatusCode, request::SendError};
 use fastly::kv_store::{KVStore, KVStoreError};
-use fastly::{mime, Error as FastlyError, Request, Response};
+use fastly::{Error as FastlyError, Request, Response, mime};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -30,7 +30,8 @@ struct DnsResponse {
     answer: Option<Vec<DnsAnswer>>,
 }
 
-#[derive(Serialize)]struct VerificationResult<'a> {
+#[derive(Serialize)]
+struct VerificationResult<'a> {
     result: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<&'a str>,
@@ -59,8 +60,14 @@ enum VerifyError {
     SendError(#[from] SendError),
     #[error("DNS Query Failed for {url}: HTTP Status {status}")]
     DnsQueryHttpFailed { url: String, status: StatusCode },
-    #[error("DNS Query Failed (Resolver Status {resolver_status}) for {query_type} record of '{name}'")]
-    DnsQueryResolverFailed { name: String, query_type: String, resolver_status: u32 },
+    #[error(
+        "DNS Query Failed (Resolver Status {resolver_status}) for {query_type} record of '{name}'"
+    )]
+    DnsQueryResolverFailed {
+        name: String,
+        query_type: String,
+        resolver_status: u32,
+    },
     #[error("DNS Response format unexpected: {0}")]
     DnsFormatError(String),
     #[error("KV Store Operation Failed: {0}")]
@@ -73,10 +80,10 @@ enum VerifyError {
     JsonError(#[from] serde_json::Error),
     #[error("Invalid IP Address Format: {0}")]
     InvalidIpFormat(String),
-    
+
     // not used.
     #[error("Internal Operation Error: {0}")]
-    InternalError(String), 
+    InternalError(String),
 }
 
 impl VerifyError {
@@ -85,20 +92,37 @@ impl VerifyError {
             VerifyError::BadRequest(reason) | VerifyError::InvalidIpFormat(reason) => {
                 (StatusCode::BAD_REQUEST, "error", reason.as_str())
             }
-            VerifyError::SendError(_) | VerifyError::DnsQueryHttpFailed { .. } | VerifyError::DnsQueryResolverFailed { .. } | VerifyError::DnsFormatError(_) => {
+            VerifyError::SendError(_)
+            | VerifyError::DnsQueryHttpFailed { .. }
+            | VerifyError::DnsQueryResolverFailed { .. }
+            | VerifyError::DnsFormatError(_) => {
                 (StatusCode::BAD_GATEWAY, "error", "DNS resolution error")
             }
-            VerifyError::KvStore(_) | VerifyError::KvValueReadError(_) | VerifyError::KvStoreNotFound(_) => {
+            VerifyError::KvStore(_)
+            | VerifyError::KvValueReadError(_)
+            | VerifyError::KvStoreNotFound(_) => {
                 eprintln!("KV Store Error: {}", self);
-                (StatusCode::INTERNAL_SERVER_ERROR, "error", "Internal cache operation failed")
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "error",
+                    "Internal cache operation failed",
+                )
             }
             VerifyError::JsonError(e) => {
                 eprintln!("JSON Error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "error", "JSON processing error")
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "error",
+                    "JSON processing error",
+                )
             }
             VerifyError::InternalError(e) => {
                 eprintln!("Internal Operation Error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "error", "Internal operation failed")
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "error",
+                    "Internal operation failed",
+                )
             }
         };
 
@@ -150,19 +174,25 @@ fn run_verification(req: &Request) -> Result<Response, VerifyError> {
     let forward_ips = fetch_address_records(&ptr_domain, &ip_addr, &resolver)?;
 
     let (status_code, result_str, reason_str, answer_str) =
-    if forward_ips.iter().any(|forward_ip| *forward_ip == ip_str) {
-        (StatusCode::OK, "ok", None, Some(ptr_domain.as_str()))
-    } else {
-        (
-            StatusCode::OK,
-            "err",
-            Some("PTR domain's A/AAAA records do not match original IP."),
-            None,
-        )
-    };
+        if forward_ips.iter().any(|forward_ip| *forward_ip == ip_str) {
+            (StatusCode::OK, "ok", None, Some(ptr_domain.as_str()))
+        } else {
+            (
+                StatusCode::OK,
+                "err",
+                Some("PTR domain's A/AAAA records do not match original IP."),
+                None,
+            )
+        };
 
     let duration_ms = start.elapsed().as_nanos() as f64 / 1_000_000.0;
-    Ok(build_json_response(status_code, result_str, reason_str, answer_str, duration_ms))
+    Ok(build_json_response(
+        status_code,
+        result_str,
+        reason_str,
+        answer_str,
+        duration_ms,
+    ))
 }
 
 fn get_current_time_secs() -> u64 {
@@ -184,19 +214,28 @@ fn get_ip_and_resolver(req: &Request) -> Result<(IpAddr, DnsResolver), VerifyErr
                 resolver = match value.as_ref() {
                     "google" => DnsResolver::Google,
                     "cloudflare" => DnsResolver::Cloudflare,
-                    other => return Err(VerifyError::BadRequest(format!("Unsupported resolver '{}'. Use 'google' or 'cloudflare'.", other))),
+                    other => {
+                        return Err(VerifyError::BadRequest(format!(
+                            "Unsupported resolver '{}'. Use 'google' or 'cloudflare'.",
+                            other
+                        )));
+                    }
                 };
             }
             _ => {}
         }
     }
 
-    let ip_str = ip_opt.ok_or_else(|| VerifyError::BadRequest("Missing query parameter 'ip'".to_string()))?;
-    let ip: IpAddr = ip_str.parse().map_err(|e| VerifyError::InvalidIpFormat(format!("'{}': {}", ip_str, e)))?;
+    let ip_str = ip_opt
+        .ok_or_else(|| VerifyError::BadRequest("Missing query parameter 'ip'".to_string()))?;
+    let ip: IpAddr = ip_str
+        .parse()
+        .map_err(|e| VerifyError::InvalidIpFormat(format!("'{}': {}", ip_str, e)))?;
 
     if !is_public_ip(&ip) {
         return Err(VerifyError::BadRequest(format!(
-            "IP address {} is in a reserved or non-routable range", ip
+            "IP address {} is in a reserved or non-routable range",
+            ip
         )));
     }
 
@@ -224,8 +263,12 @@ fn is_public_ip(ip: &IpAddr) -> bool {
 }
 
 fn open_kv_store() -> Result<KVStore, VerifyError> {
-    KVStore::open(DNS_KV_STORE_NAME)?
-        .ok_or_else(|| VerifyError::KvStoreNotFound(format!("KV Store '{}' not found or not linked.", DNS_KV_STORE_NAME)))
+    KVStore::open(DNS_KV_STORE_NAME)?.ok_or_else(|| {
+        VerifyError::KvStoreNotFound(format!(
+            "KV Store '{}' not found or not linked.",
+            DNS_KV_STORE_NAME
+        ))
+    })
 }
 
 fn kv_lookup<T>(key: &str) -> Result<Option<T>, VerifyError>
@@ -238,7 +281,7 @@ where
     let mut body = lookup_resp.take_body();
     let mut bytes_vec = Vec::new();
     body.read_to_end(&mut bytes_vec)?;
-    
+
     match serde_json::from_slice::<KvDnsEntry<T>>(&bytes_vec) {
         Ok(entry) => {
             let now_sec = get_current_time_secs();
@@ -249,7 +292,10 @@ where
             }
         }
         Err(e) => {
-            eprintln!("KVStore corrupted entry for key '{}': {}. Treating as cache miss.", key, e);
+            eprintln!(
+                "KVStore corrupted entry for key '{}': {}. Treating as cache miss.",
+                key, e
+            );
             Ok(None)
         }
     }
@@ -268,7 +314,10 @@ where
             let now_sec = get_current_time_secs();
             let expires_at_unix_sec = now_sec.saturating_add(ttl.as_secs());
             if expires_at_unix_sec > now_sec {
-                let entry = KvDnsEntry { data, expires_at_unix_sec };
+                let entry = KvDnsEntry {
+                    data,
+                    expires_at_unix_sec,
+                };
                 let bytes = serde_json::to_vec(&entry)?;
                 store.insert(key, bytes)?;
             }
@@ -281,7 +330,10 @@ where
             Ok(())
         }
         Err(e) => {
-            eprintln!("KVStore insert failed for key '{}' (store open error): {}", key, e);
+            eprintln!(
+                "KVStore insert failed for key '{}' (store open error): {}",
+                key, e
+            );
             Err(e)
         }
     }
@@ -328,10 +380,13 @@ fn fetch_ptr_domain(reverse_name: &str, resolver: &DnsResolver) -> Result<String
         });
     }
 
-    let answer = dns_resp.answer
+    let answer = dns_resp
+        .answer
         .as_ref()
         .and_then(|a| a.first())
-        .ok_or_else(|| VerifyError::DnsFormatError(format!("No PTR answer found for {}", reverse_name)))?;
+        .ok_or_else(|| {
+            VerifyError::DnsFormatError(format!("No PTR answer found for {}", reverse_name))
+        })?;
 
     let domain = answer.data.trim_end_matches('.').to_string();
     let ttl = Duration::from_secs(answer.ttl.into());
@@ -341,7 +396,11 @@ fn fetch_ptr_domain(reverse_name: &str, resolver: &DnsResolver) -> Result<String
     Ok(domain)
 }
 
-fn fetch_address_records(domain: &str, original_ip: &IpAddr, resolver: &DnsResolver) -> Result<Vec<String>, VerifyError> {
+fn fetch_address_records(
+    domain: &str,
+    original_ip: &IpAddr,
+    resolver: &DnsResolver,
+) -> Result<Vec<String>, VerifyError> {
     let (query_type, kv_key_prefix) = match original_ip {
         IpAddr::V4(_) => ("A", "a"),
         IpAddr::V6(_) => ("AAAA", "aaaa"),
@@ -367,12 +426,19 @@ fn fetch_address_records(domain: &str, original_ip: &IpAddr, resolver: &DnsResol
     let answers = dns_resp.answer.as_deref().unwrap_or(&[]);
     if answers.is_empty() {
         return Err(VerifyError::DnsFormatError(format!(
-            "No {} records found for domain '{}' (empty answer section)", query_type, domain
+            "No {} records found for domain '{}' (empty answer section)",
+            query_type, domain
         )));
     }
 
-    let ttl = Duration::from_secs(answers.iter().map(|a| a.ttl).min().unwrap_or(DEFAULT_DNS_TTL_SECS as u32) as u64);
-    let ips: Vec<String> = answers.into_iter().map(|ans| ans.data).collect();
+    let ttl = Duration::from_secs(
+        answers.iter()
+            .map(|a| a.ttl)
+            .min()
+            .unwrap_or(DEFAULT_DNS_TTL_SECS as u32) as u64
+    );
+    let ips: Vec<String> = answers.iter().map(|ans| ans.data.clone()).collect();
+
 
     let _ = kv_insert(&kv_key, ips.clone(), ttl);
 
@@ -420,7 +486,10 @@ trait ReverseLookup {
 impl ReverseLookup for Ipv4Addr {
     fn reverse_lookup_name(&self) -> Result<String, VerifyError> {
         let octets = self.octets();
-        Ok(format!("{}.{}.{}.{}.in-addr.arpa", octets[3], octets[2], octets[1], octets[0]))
+        Ok(format!(
+            "{}.{}.{}.{}.in-addr.arpa",
+            octets[3], octets[2], octets[1], octets[0]
+        ))
     }
 }
 
@@ -440,7 +509,10 @@ impl ReverseLookup for Ipv6Addr {
             let nibble1 = high_byte & 0x0f;
             let nibble0 = high_byte >> 4;
 
-            reversed_nibbles.push_str(&format!("{:x}.{:x}.{:x}.{:x}.", nibble3, nibble2, nibble1, nibble0));
+            reversed_nibbles.push_str(&format!(
+                "{:x}.{:x}.{:x}.{:x}.",
+                nibble3, nibble2, nibble1, nibble0
+            ));
         }
 
         reversed_nibbles.push_str("ip6.arpa");
