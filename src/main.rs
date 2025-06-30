@@ -7,6 +7,13 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::form_urlencoded;
 
+// Define backends/urls.
+const GOOGLE_BACKEND: &str = "google";
+const GOOGLE_BASE_URL: &str = "https://dns.google.com/resolve";
+
+const CLOUDFLARE_BACKEND: &str = "cloudflare";
+const CLOUDFLARE_BASE_URL: &str = "https://cloudflare-dns.com/dns-query";
+
 #[derive(Deserialize, Debug)]
 struct DnsAnswer {
     #[serde(rename = "TTL")]
@@ -109,17 +116,10 @@ enum DnsResolver {
 // TODO: Remove cloudflare.
 // It is neither better, or worse and using 2 providers for diff TTLs is a bit meh unless I want to change the KV store to be per provider.
 impl DnsResolver {
-    fn base_url(&self) -> &'static str {
+    fn config(&self) -> (&'static str, &'static str) {
         match self {
-            DnsResolver::Google => "https://dns.google.com/resolve",
-            DnsResolver::Cloudflare => "https://cloudflare-dns.com/dns-query",
-        }
-    }
-
-    fn backend_name(&self) -> &'static str {
-        match self {
-            DnsResolver::Google => "google",
-            DnsResolver::Cloudflare => "cloudflare",
+            DnsResolver::Google => (GOOGLE_BACKEND, GOOGLE_BASE_URL),
+            DnsResolver::Cloudflare => (CLOUDFLARE_BACKEND, CLOUDFLARE_BASE_URL),
         }
     }
 }
@@ -282,14 +282,12 @@ where
         }
         Err(e) => {
             eprintln!("KVStore insert failed for key '{}' (store open error): {}", key, e);
-            Ok(())
+            Err(e)
         }
     }
 }
 
-fn fetch_dns_response(url: &str, resolver: &DnsResolver) -> Result<DnsResponse, VerifyError> {
-    let backend = resolver.backend_name();
-
+fn fetch_dns_response(url: &str, backend: &str) -> Result<DnsResponse, VerifyError> {
     let resp = Request::get(url)
         .with_header("Accept", "application/dns-json")
         .send(backend)?;
@@ -318,8 +316,9 @@ fn fetch_ptr_domain(reverse_name: &str, resolver: &DnsResolver) -> Result<String
         return Ok(domain);
     }
 
-    let url = format!("{}?name={}&type=PTR", resolver.base_url(), reverse_name);
-    let dns_resp = fetch_dns_response(&url, resolver)?;
+    let (backend_name, base_url) = resolver.config();
+    let url = format!("{}?name={}&type=PTR", base_url, reverse_name);
+    let dns_resp = fetch_dns_response(&url, backend_name)?;
 
     if dns_resp.status != 0 {
         return Err(VerifyError::DnsQueryResolverFailed {
@@ -353,8 +352,9 @@ fn fetch_address_records(domain: &str, original_ip: &IpAddr, resolver: &DnsResol
         return Ok(ips);
     }
 
-    let url = format!("{}?name={}&type={}", resolver.base_url(), domain, query_type);
-    let dns_resp = fetch_dns_response(&url, resolver)?;
+    let (backend_name, base_url) = resolver.config();
+    let url = format!("{}?name={}&type={}", base_url, domain, query_type);
+    let dns_resp = fetch_dns_response(&url, backend_name)?;
 
     if dns_resp.status != 0 {
         return Err(VerifyError::DnsQueryResolverFailed {
@@ -364,7 +364,7 @@ fn fetch_address_records(domain: &str, original_ip: &IpAddr, resolver: &DnsResol
         });
     }
 
-    let answers = dns_resp.answer.unwrap_or_default();
+    let answers = dns_resp.answer.as_deref().unwrap_or(&[]);
     if answers.is_empty() {
         return Err(VerifyError::DnsFormatError(format!(
             "No {} records found for domain '{}' (empty answer section)", query_type, domain
