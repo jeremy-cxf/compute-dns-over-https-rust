@@ -27,7 +27,7 @@ $ curl -s "http://127.0.0.1:7676/verify?ip=108.174.2.216" | jq                  
 
 To use cloudflare:
 ```
-curl -s "http://127.0.0.1:7676/verify?ip=108.174.8.21&resolver=google" | jq                                                                                    ~  
+curl -s "http://127.0.0.1:7676/verify?ip=108.174.8.21&resolver=cloudflare" | jq                                                                                    ~  
 {
   "result": "ok",
   "answer": "108-174-2-216.fwd.linkedin.com",
